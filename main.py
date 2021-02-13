@@ -9,7 +9,7 @@ from ortools.sat.python import cp_model
 # Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
 # Create the linear solver with the GLOP backend.
 
-def print_hi(name):
+def basic_linear(name):
     solver = pywraplp.Solver.CreateSolver('GLOP')
 
     # Use a breakpoint in the code line below to debug your script.
@@ -39,7 +39,8 @@ def print_hi(name):
     print('y =', y.solution_value())
 
 
-def MinimalJobshopSat():
+# https://developers.google.com/optimization/scheduling/job_shop
+def flexible_job_shop_problem():
     """Minimal jobshop problem."""
     # Create the model.
     model = cp_model.CpModel()
@@ -182,5 +183,5 @@ class SolutionPrinter(cp_model.CpSolverSolutionCallback):
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     # print_hi('PyCharm')
-    MinimalJobshopSat()
+    flexible_job_shop_problem()
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
