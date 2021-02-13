@@ -45,19 +45,20 @@ def MinimalJobshopSat():
     model = cp_model.CpModel()
 
     # Data
-    jobs_data = [  # task = (machine_id, processing_time).
-        [(0, 3), (1, 2), (2, 2)],  # Job0
-        [(0, 2), (2, 1), (1, 4)],  # Job1
-        [(1, 4), (2, 3)]  # Job2
+    jobs_data = [
+        [3, 2, 2],
+        [2, 1, 4],
+        [4, 3]
     ]
 
-    machines_count = 1 + max(task[0] for job in jobs_data for task in job)
+    # Create 3 machines
+    machines_count = 3
     all_machines = range(machines_count)
 
     # Variables
 
     # Computes horizon dynamically as the sum of all durations.
-    horizon = sum(task[1] for job in jobs_data for task in job)
+    horizon = sum(task for job in jobs_data for task in job)
 
     # Named tuple to store information about created variables.
     task_type = collections.namedtuple('task_type', 'start end interval')
@@ -67,37 +68,49 @@ def MinimalJobshopSat():
 
     # Creates job intervals and add to the corresponding machine lists.
     all_tasks = {}
+    all_tasks_assigned = {}
     machine_to_intervals = collections.defaultdict(list)
 
     for job_id, job in enumerate(jobs_data):
         for task_id, task in enumerate(job):
-            machine = task[0]
-            duration = task[1]
-            suffix = '_%i_%i' % (job_id, task_id)
-            start_var = model.NewIntVar(0, horizon, 'start' + suffix)
-            end_var = model.NewIntVar(0, horizon, 'end' + suffix)
-            interval_var = model.NewIntervalVar(start_var, duration, end_var,
-                                                'interval' + suffix)
-            all_tasks[job_id, task_id] = task_type(
-                start=start_var, end=end_var, interval=interval_var)
-            machine_to_intervals[machine].append(interval_var)
+            # add machine no overlap
+            for machine_id, machine in enumerate(all_machines):
+                duration = task
+                suffix = '_%i_%i_%i' % (job_id, task_id, machine_id)
+                start_var = model.NewIntVar(0, horizon, 'start' + suffix)
+                end_var = model.NewIntVar(0, horizon, 'end' + suffix)
+                assign = model.NewBoolVar('assigned' + suffix)
+                interval_var = model.NewOptionalIntervalVar(start_var, duration, end_var, assign,
+                                                            'interval' + suffix)
+                machine_to_intervals[machine].append(interval_var)
 
-    # Create and add disjunctive constraints.
-    for machine in all_machines:
+                all_tasks[job_id, task_id, machine_id] = task_type(
+                    start=start_var, end=end_var, interval=interval_var)
+                all_tasks_assigned[job_id, task_id, machine_id] = assign
+
+    for machine in enumerate(all_machines):
         model.AddNoOverlap(machine_to_intervals[machine])
+
+    # Task only assigned to one machine
+    for job_id, job in enumerate(jobs_data):
+        for task_id, task in enumerate(job):
+            model.Add(sum(all_tasks_assigned[job_id, task_id, machine_id] for machine_id in all_machines) == 1)
 
     # Precedences inside a job.
     for job_id, job in enumerate(jobs_data):
         for task_id in range(len(job) - 1):
-            model.Add(all_tasks[job_id, task_id +
-                                1].start >= all_tasks[job_id, task_id].end)
+            for machine_id in range(len(all_machines)):
+                for machine_id1 in range(len(all_machines) - machine_id):
+                    model.Add(all_tasks[job_id, task_id + 1, machine_id1].start
+                              >= all_tasks[job_id, task_id, machine_id].end)
 
     # Makespan objective.
     obj_var = model.NewIntVar(0, horizon, 'makespan')
-    model.AddMaxEquality(obj_var, [
-        all_tasks[job_id, len(job) - 1].end
-        for job_id, job in enumerate(jobs_data)
-    ])
+    for machine_id, machine in enumerate(all_machines):
+        model.AddMaxEquality(obj_var, [
+            all_tasks[job_id, len(job) - 1, machine_id].end
+            for job_id, job in enumerate(jobs_data)
+        ])
     model.Minimize(obj_var)
 
     # Solve model.
@@ -109,13 +122,13 @@ def MinimalJobshopSat():
     assigned_jobs = collections.defaultdict(list)
     for job_id, job in enumerate(jobs_data):
         for task_id, task in enumerate(job):
-            machine = task[0]
-            assigned_jobs[machine].append(
-                assigned_task_type(
-                    start=solver.Value(all_tasks[job_id, task_id].start),
-                    job=job_id,
-                    index=task_id,
-                    duration=task[1]))
+            for machine_id, machine in enumerate(all_machines):
+                assigned_jobs[machine].append(
+                    assigned_task_type(
+                        start=solver.Value(all_tasks[job_id, task_id, machine_id].start),
+                        job=job_id,
+                        index=task_id,
+                        duration=task))
 
     # Create per machine output lines.
     output = ''
@@ -144,6 +157,12 @@ def MinimalJobshopSat():
     # Finally print the solution found.
     print('Optimal Schedule Length: %i' % solver.ObjectiveValue())
     print(output)
+
+    # Statistics.
+    print('Statistics')
+    print('  - conflicts       : %i' % solver.NumConflicts())
+    print('  - branches        : %i' % solver.NumBranches())
+    print('  - wall time       : %f s' % solver.WallTime())
 
 
 class SolutionPrinter(cp_model.CpSolverSolutionCallback):
